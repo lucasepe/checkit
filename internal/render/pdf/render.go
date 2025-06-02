@@ -1,0 +1,287 @@
+package pdf
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/lucasepe/checkit/internal/render"
+	"github.com/lucasepe/x/text/slugify"
+	"github.com/signintech/gopdf"
+	"golang.org/x/image/font/gofont/gomono"
+)
+
+type RenderOption func(g *pdfRenderImpl)
+
+func FontSize(size float64) RenderOption {
+	return func(g *pdfRenderImpl) {
+		g.opts.itemFontSize = size
+		if size <= 6 {
+			g.opts.itemFontSize = 10
+		}
+	}
+}
+
+func OutputDir(dir string) RenderOption {
+	return func(g *pdfRenderImpl) {
+		g.opts.outputDir = strings.TrimSpace(dir)
+		if g.opts.outputDir == "" {
+			g.opts.outputDir, _ = os.Getwd()
+		}
+	}
+}
+
+func New(opts ...RenderOption) (render.Renderer, error) {
+	g := &pdfRenderImpl{
+		doc:  &gopdf.GoPdf{},
+		opts: pdfRenderOptions{},
+	}
+
+	for _, opt := range opts {
+		opt(g)
+	}
+
+	if err := g.setup(); err != nil {
+		return g, err
+	}
+
+	g.doc.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
+	err := g.doc.AddTTFFontData(fontName, gomono.TTF)
+	if err != nil {
+		return g, err
+	}
+
+	g.doc.AddPage()
+	g.pageCount = 1
+
+	return g, nil
+}
+
+const (
+	fontName     = "GoMono"
+	symbol       = "\u25CB" // ○
+	indentSpaces = "  "     // Indent for wrapped lines
+
+	defaultCreator = "Check IT (github.com/lucasepe/checkit)"
+)
+
+var _ render.Renderer = (*pdfRenderImpl)(nil)
+
+type pdfRenderOptions struct {
+	pageWidth  float64
+	pageHeight float64
+
+	marginTop    float64
+	marginBottom float64
+	marginLeft   float64
+
+	groupTitleFontSize float64
+	itemFontSize       float64
+	groupTitleMargin   float64
+	itemMargin         float64
+
+	documentTitleFontSize float64
+
+	lineSpacing float64
+
+	outputDir string
+}
+
+type pdfRenderImpl struct {
+	doc       *gopdf.GoPdf
+	opts      pdfRenderOptions
+	pageCount int
+	lineCount int
+	filename  string
+}
+
+func (g *pdfRenderImpl) Render(src io.Reader) (err error) {
+	y := 0.0
+	title := ""
+
+	scanner := bufio.NewScanner(src)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		g.lineCount += 1
+
+		if title, ok := g.isGroup(line); ok {
+			y, err = g.handleGroup(y, title)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		if g.lineCount == 1 {
+			title = line
+			y, err = g.handleDocumentTitle(y, line)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		y, err = g.handleItem(y, line)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	if title != "" {
+		g.setMeta(title)
+	}
+
+	return g.savePDF()
+}
+
+func (g *pdfRenderImpl) setup() error {
+	fontSize := g.opts.itemFontSize
+
+	g.opts.pageWidth = float64(gopdf.PageSizeA4.W)
+	g.opts.pageHeight = float64(gopdf.PageSizeA4.H)
+
+	g.opts.marginTop = 60.0
+	g.opts.marginBottom = 40.0
+	g.opts.marginLeft = 40.0
+
+	g.opts.lineSpacing = 0.5 * fontSize
+
+	g.opts.itemMargin = 1.15 * fontSize
+
+	g.opts.groupTitleFontSize = fontSize + 4
+	g.opts.groupTitleMargin = 1.2 * (fontSize + 4)
+
+	g.opts.documentTitleFontSize = (fontSize + 4) + 4
+
+	return os.MkdirAll(g.opts.outputDir, 0755)
+}
+
+func (g *pdfRenderImpl) setMeta(title string) {
+	author, ok := os.LookupEnv("USER")
+	if !ok {
+		author, ok = os.LookupEnv("USERNAME")
+	}
+	if !ok {
+		author = defaultCreator
+	}
+
+	g.doc.SetInfo(gopdf.PdfInfo{
+		Title:        title,
+		Author:       author,
+		Subject:      title,
+		Creator:      defaultCreator,
+		Producer:     defaultCreator,
+		CreationDate: time.Now(),
+	})
+}
+
+func (g *pdfRenderImpl) isGroup(line string) (string, bool) {
+	if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+		return strings.Trim(line, "[]"), true
+	}
+	return line, false
+}
+
+func (g *pdfRenderImpl) handleGroup(y float64, title string) (float64, error) {
+	if y+g.opts.groupTitleFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
+		g.doc.AddPage()
+		g.pageCount++
+
+		y = g.opts.marginTop
+	}
+
+	g.doc.SetFont(fontName, "", g.opts.groupTitleFontSize)
+	g.doc.SetX(g.opts.marginLeft)
+	g.doc.SetY(y + g.opts.groupTitleMargin)
+	g.doc.Text(title)
+	y += g.opts.groupTitleFontSize + 2*g.opts.groupTitleMargin
+
+	err := g.doc.SetFont(fontName, "", g.opts.itemFontSize) // reset to item font
+
+	return y, err
+}
+
+func (g *pdfRenderImpl) handleDocumentTitle(y float64, title string) (float64, error) {
+	g.filename = fmt.Sprintf("%s.pdf", slugify.Sprint(title))
+
+	err := g.doc.SetFont(fontName, "", g.opts.documentTitleFontSize)
+	if err != nil {
+		return y, err
+	}
+
+	// Calcola larghezza testo
+	titleWidth, err := g.doc.MeasureTextWidth(title)
+	if err != nil {
+		return y, err
+	}
+
+	// Centra il testo orizzontalmente
+	titleX := (g.opts.pageWidth - titleWidth) / 2
+
+	// Posiziona in alto
+	g.doc.SetX(titleX)
+	g.doc.SetY(g.opts.marginTop)
+	g.doc.Text(title)
+
+	// Sposta `y` sotto il titolo
+	y += g.opts.marginTop + g.opts.documentTitleFontSize + g.opts.groupTitleMargin
+
+	err = g.doc.SetFont(fontName, "", g.opts.itemFontSize) // reset to item font
+
+	return y, err
+}
+
+func (g *pdfRenderImpl) handleItem(y float64, line string) (float64, error) {
+	prefix := fmt.Sprintf("%s ", symbol)
+	maxTextWidth := g.opts.pageWidth - 2*g.opts.marginLeft
+	wrappedLines := wrapTextWithPrefix(g.doc, line, prefix, indentSpaces, maxTextWidth)
+
+	for _, l := range wrappedLines {
+		if y+g.opts.itemFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
+			g.doc.AddPage()
+			g.pageCount++
+			y = g.opts.marginTop
+		}
+
+		g.doc.SetX(g.opts.marginLeft)
+		g.doc.SetY(y)
+		g.doc.Text(l)
+		y += g.opts.itemFontSize + g.opts.itemMargin
+	}
+
+	return y, nil
+}
+
+func (g *pdfRenderImpl) savePDF() error {
+	err := g.doc.SetFont(fontName, "", 8.0)
+	if err != nil {
+		return err
+	}
+
+	for i := range g.pageCount {
+		g.doc.SetPage(i + 1)
+		pageText := fmt.Sprintf("%d / %d", i+1, g.pageCount)
+		pageNumWidth, err := g.doc.MeasureTextWidth(pageText)
+		if err != nil {
+			return err
+		}
+
+		g.doc.SetX(g.opts.pageWidth - g.opts.marginLeft - pageNumWidth)
+		g.doc.SetY(g.opts.pageHeight - g.opts.marginBottom + 8) // un po' sopra il bordo inferiore
+		g.doc.Text(pageText)
+	}
+
+	return g.doc.WritePdf(filepath.Join(g.opts.outputDir, g.filename))
+}
