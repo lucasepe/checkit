@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/lucasepe/checkit/internal/parser"
 	pdfrender "github.com/lucasepe/checkit/internal/render/pdf"
 	getoptutil "github.com/lucasepe/checkit/internal/util/getopt"
 	ioutil "github.com/lucasepe/checkit/internal/util/io"
@@ -38,6 +39,11 @@ func Do(args []string) error {
 	}
 	defer cleanup()
 
+	lst, err := parser.Parse(src)
+	if err != nil {
+		return err
+	}
+
 	render, err := pdfrender.New(
 		pdfrender.FontSize(fontSize),
 		pdfrender.OutputDir(output),
@@ -46,5 +52,5 @@ func Do(args []string) error {
 		return err
 	}
 
-	return render.Render(src)
+	return render.Render(&lst)
 }

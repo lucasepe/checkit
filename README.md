@@ -31,28 +31,30 @@ If no `INPUT_FILE` is provided, input is read from `stdin`.
 
 ```sh
 # Generate a PDF checklist from a file
-checkit /path/to/my-checklist.ini
+checkit /path/to/my-checklist.md
 
 # Pipe input from another command
-cat /path/to/my-checklist.ini | checkit
+cat /path/to/my-checklist.md | checkit
 ```
 
 
 ### Input Format
 
-`checkit` expects an `.ini`-style structured file. Each section becomes a titled group in the output, and each item becomes a checklist item. Example:
+`checkit` expects a markdown `.md`-style structured file. Example:
 
-```ini
-My CheckList Title
+```md
+# My CheckList Title
 
-[Morning Routine]
-Coffee
-Shower
-Emails
+## Morning Routine
 
-[Work]
-Code Review
-Team Meeting
+- Coffee
+- Shower
+- Emails
+
+## Work
+
+- Code Review
+- Team Meeting
 ```
 
 You can find some sample input files along with the generated PDF documents [here](./testdata).

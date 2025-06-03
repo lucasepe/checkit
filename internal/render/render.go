@@ -1,7 +1,9 @@
 package render
 
-import "io"
+import (
+	"github.com/lucasepe/checkit/internal/parser"
+)
 
 type Renderer interface {
-	Render(io.Reader) error
+	Render(*parser.CheckList) error
 }

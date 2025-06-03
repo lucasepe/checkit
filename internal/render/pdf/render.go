@@ -1,14 +1,13 @@
 package pdf
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/lucasepe/checkit/internal/parser"
 	"github.com/lucasepe/checkit/internal/render"
 	"github.com/lucasepe/x/text/slugify"
 	"github.com/signintech/gopdf"
@@ -62,9 +61,10 @@ func New(opts ...RenderOption) (render.Renderer, error) {
 }
 
 const (
-	fontName     = "GoMono"
-	symbol       = "\u25CB" // ○
-	indentSpaces = "  "     // Indent for wrapped lines
+	fontName       = "GoMono"
+	symbol         = "\u25CB" // ○
+	itemIndent     = "   "    // Indent for wrapped lines
+	itemNoteIndent = "     "  // Indent for wrapped lines
 
 	defaultCreator = "Check IT (github.com/lucasepe/checkit)"
 )
@@ -80,9 +80,13 @@ type pdfRenderOptions struct {
 	marginLeft   float64
 
 	groupTitleFontSize float64
-	itemFontSize       float64
 	groupTitleMargin   float64
-	itemMargin         float64
+
+	itemFontSize float64
+	itemMargin   float64
+
+	itemNoteFontSize float64
+	itemNoteMargin   float64
 
 	documentTitleFontSize float64
 
@@ -99,48 +103,36 @@ type pdfRenderImpl struct {
 	filename  string
 }
 
-func (g *pdfRenderImpl) Render(src io.Reader) (err error) {
+func (g *pdfRenderImpl) Render(lst *parser.CheckList) (err error) {
 	y := 0.0
-	title := ""
 
-	scanner := bufio.NewScanner(src)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		g.lineCount += 1
-
-		if title, ok := g.isGroup(line); ok {
-			y, err = g.handleGroup(y, title)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-
-		if g.lineCount == 1 {
-			title = line
-			y, err = g.handleDocumentTitle(y, line)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-
-		y, err = g.handleItem(y, line)
+	if lst.Title != "" {
+		g.setMeta(lst.Title)
+		y, err = g.handleDocumentTitle(y, lst.Title)
 		if err != nil {
 			return err
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return err
-	}
+	for _, grp := range lst.Groups {
+		y, err = g.handleGroup(y, grp.Title)
+		if err != nil {
+			return err
+		}
 
-	if title != "" {
-		g.setMeta(title)
+		for _, it := range grp.Items {
+			y, err = g.handleItem(y, it.Title)
+			if err != nil {
+				return err
+			}
+
+			for _, nt := range it.Notes {
+				y, err = g.handleItemNote(y, nt)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	return g.savePDF()
@@ -158,10 +150,13 @@ func (g *pdfRenderImpl) setup() error {
 
 	g.opts.lineSpacing = 0.5 * fontSize
 
-	g.opts.itemMargin = 1.15 * fontSize
+	g.opts.itemMargin = 0.8 * fontSize
+
+	g.opts.itemNoteFontSize = 0.75 * fontSize
+	g.opts.itemNoteMargin = 1.15 * (0.75 * fontSize)
 
 	g.opts.groupTitleFontSize = fontSize + 4
-	g.opts.groupTitleMargin = 1.2 * (fontSize + 4)
+	g.opts.groupTitleMargin = 1.1 * (fontSize + 4)
 
 	g.opts.documentTitleFontSize = (fontSize + 4) + 4
 
@@ -187,39 +182,33 @@ func (g *pdfRenderImpl) setMeta(title string) {
 	})
 }
 
-func (g *pdfRenderImpl) isGroup(line string) (string, bool) {
-	if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-		return strings.Trim(line, "[]"), true
-	}
-	return line, false
-}
-
 func (g *pdfRenderImpl) handleGroup(y float64, title string) (float64, error) {
 	if y+g.opts.groupTitleFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
 		g.doc.AddPage()
 		g.pageCount++
 
 		y = g.opts.marginTop
+	} else {
+		y += g.opts.groupTitleMargin
 	}
 
 	g.doc.SetFont(fontName, "", g.opts.groupTitleFontSize)
 	g.doc.SetX(g.opts.marginLeft)
-	g.doc.SetY(y + g.opts.groupTitleMargin)
+	g.doc.SetY(y)
 	g.doc.Text(title)
-	y += g.opts.groupTitleFontSize + 2*g.opts.groupTitleMargin
 
-	err := g.doc.SetFont(fontName, "", g.opts.itemFontSize) // reset to item font
+	y += g.opts.groupTitleFontSize //+ 0.5*g.opts.groupTitleMargin
 
-	return y, err
+	return y, nil
 }
 
 func (g *pdfRenderImpl) handleDocumentTitle(y float64, title string) (float64, error) {
-	g.filename = fmt.Sprintf("%s.pdf", slugify.Sprint(title))
-
 	err := g.doc.SetFont(fontName, "", g.opts.documentTitleFontSize)
 	if err != nil {
 		return y, err
 	}
+
+	g.filename = fmt.Sprintf("%s.pdf", slugify.Sprint(title))
 
 	// Calcola larghezza testo
 	titleWidth, err := g.doc.MeasureTextWidth(title)
@@ -236,17 +225,22 @@ func (g *pdfRenderImpl) handleDocumentTitle(y float64, title string) (float64, e
 	g.doc.Text(title)
 
 	// Sposta `y` sotto il titolo
-	y += g.opts.marginTop + g.opts.documentTitleFontSize + g.opts.groupTitleMargin
+	y += g.opts.marginTop + g.opts.documentTitleFontSize + 0.5*g.opts.groupTitleMargin
 
-	err = g.doc.SetFont(fontName, "", g.opts.itemFontSize) // reset to item font
-
-	return y, err
+	return y, nil
 }
 
 func (g *pdfRenderImpl) handleItem(y float64, line string) (float64, error) {
-	prefix := fmt.Sprintf("%s ", symbol)
+	err := g.doc.SetFont(fontName, "", g.opts.itemFontSize) // reset to item font
+	if err != nil {
+		return y, err
+	}
+
+	prefix := fmt.Sprintf(" %s ", symbol)
 	maxTextWidth := g.opts.pageWidth - 2*g.opts.marginLeft
-	wrappedLines := wrapTextWithPrefix(g.doc, line, prefix, indentSpaces, maxTextWidth)
+	wrappedLines := wrapTextWithPrefix(g.doc, line, prefix, itemIndent, maxTextWidth)
+
+	y += g.opts.itemMargin
 
 	for _, l := range wrappedLines {
 		if y+g.opts.itemFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
@@ -259,6 +253,31 @@ func (g *pdfRenderImpl) handleItem(y float64, line string) (float64, error) {
 		g.doc.SetY(y)
 		g.doc.Text(l)
 		y += g.opts.itemFontSize + g.opts.itemMargin
+	}
+
+	return y, nil
+}
+
+func (g *pdfRenderImpl) handleItemNote(y float64, line string) (float64, error) {
+	err := g.doc.SetFont(fontName, "", g.opts.itemNoteFontSize) // reset to item font
+	if err != nil {
+		return y, err
+	}
+
+	maxTextWidth := g.opts.pageWidth - 2*g.opts.marginLeft
+	wrappedLines := wrapTextWithPrefix(g.doc, line, itemNoteIndent, itemNoteIndent, maxTextWidth)
+
+	for _, l := range wrappedLines {
+		if y+g.opts.itemNoteFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
+			g.doc.AddPage()
+			g.pageCount++
+			y = g.opts.marginTop
+		}
+
+		g.doc.SetX(g.opts.marginLeft)
+		g.doc.SetY(y)
+		g.doc.Text(l)
+		y += g.opts.itemNoteFontSize + g.opts.itemNoteMargin
 	}
 
 	return y, nil
