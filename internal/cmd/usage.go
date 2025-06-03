@@ -54,9 +54,9 @@ func usage(wri io.Writer) {
 
 	fmt.Fprint(wri, "EXAMPLES:\n\n")
 	fmt.Fprint(wri, " » Generate a PDF checklist from a file:\n\n")
-	fmt.Fprintf(wri, "     %s /path/to/my-checklist.ini\n\n", appName)
+	fmt.Fprintf(wri, "     %s /path/to/my-checklist.md\n\n", appName)
 	fmt.Fprint(wri, " » Pipe input from another command:\n\n")
-	fmt.Fprintf(wri, "     cat /path/to/my-checklist.ini | %s\n\n", appName)
+	fmt.Fprintf(wri, "     cat /path/to/my-checklist.md | %s\n\n", appName)
 
 	fmt.Fprint(wri, "SUPPORT:\n\n")
 	fmt.Fprint(wri, xtext.Indent(strings.Join(donateInfo, "\n"), "  "))
