@@ -46,8 +46,8 @@ func usage(wri io.Writer) {
 	fmt.Fprintf(wri, "  %s [FLAGS] [INPUT_FILE]\n\n", appName)
 
 	fmt.Fprint(wri, "FLAGS:\n\n")
-	fmt.Fprint(wri, "  -s, --font-size     Base font size in points (default: 12).\n")
 	fmt.Fprint(wri, "  -o, --output-dir    Output directory for generated PDF.\n")
+	fmt.Fprint(wri, "  -s, --square        Use a 1:1 aspect ratio layout.\n")
 	fmt.Fprint(wri, "  -h, --help          Show help and exit.\n")
 	fmt.Fprint(wri, "  -v, --version       Show version and exit.\n")
 	fmt.Fprintln(wri)

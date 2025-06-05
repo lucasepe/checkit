@@ -2,9 +2,9 @@ package pdf
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/lucasepe/checkit/internal/parser"
@@ -14,30 +14,10 @@ import (
 	"golang.org/x/image/font/gofont/gomono"
 )
 
-type RenderOption func(g *pdfRenderImpl)
-
-func FontSize(size float64) RenderOption {
-	return func(g *pdfRenderImpl) {
-		g.opts.itemFontSize = size
-		if size <= 6 {
-			g.opts.itemFontSize = 10
-		}
-	}
-}
-
-func OutputDir(dir string) RenderOption {
-	return func(g *pdfRenderImpl) {
-		g.opts.outputDir = strings.TrimSpace(dir)
-		if g.opts.outputDir == "" {
-			g.opts.outputDir, _ = os.Getwd()
-		}
-	}
-}
-
 func New(opts ...RenderOption) (render.Renderer, error) {
 	g := &pdfRenderImpl{
 		doc:  &gopdf.GoPdf{},
-		opts: pdfRenderOptions{},
+		opts: defaultOptions(),
 	}
 
 	for _, opt := range opts {
@@ -48,7 +28,13 @@ func New(opts ...RenderOption) (render.Renderer, error) {
 		return g, err
 	}
 
-	g.doc.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
+	g.doc.Start(gopdf.Config{
+		Unit: gopdf.UnitPT,
+		PageSize: gopdf.Rect{
+			W: g.opts.pageWidth,
+			H: g.opts.pageHeight,
+		},
+	})
 	err := g.doc.AddTTFFontData(fontName, gomono.TTF)
 	if err != nil {
 		return g, err
@@ -71,40 +57,17 @@ const (
 
 var _ render.Renderer = (*pdfRenderImpl)(nil)
 
-type pdfRenderOptions struct {
-	pageWidth  float64
-	pageHeight float64
-
-	marginTop    float64
-	marginBottom float64
-	marginLeft   float64
-
-	groupTitleFontSize float64
-	groupTitleMargin   float64
-
-	itemFontSize float64
-	itemMargin   float64
-
-	itemNoteFontSize float64
-	itemNoteMargin   float64
-
-	documentTitleFontSize float64
-
-	lineSpacing float64
-
-	outputDir string
-}
-
 type pdfRenderImpl struct {
 	doc       *gopdf.GoPdf
 	opts      pdfRenderOptions
 	pageCount int
 	lineCount int
 	filename  string
+	outputDir string
 }
 
 func (g *pdfRenderImpl) Render(lst *parser.CheckList) (err error) {
-	y := 0.0
+	y := g.opts.marginTop
 
 	if lst.Title != "" {
 		g.setMeta(lst.Title)
@@ -139,28 +102,18 @@ func (g *pdfRenderImpl) Render(lst *parser.CheckList) (err error) {
 }
 
 func (g *pdfRenderImpl) setup() error {
-	fontSize := g.opts.itemFontSize
+	fontSize := 0.02 * math.Min(g.opts.pageWidth, g.opts.pageHeight)
 
-	g.opts.pageWidth = float64(gopdf.PageSizeA4.W)
-	g.opts.pageHeight = float64(gopdf.PageSizeA4.H)
-
-	g.opts.marginTop = 60.0
-	g.opts.marginBottom = 40.0
-	g.opts.marginLeft = 40.0
-
+	g.opts.itemFontSize = fontSize
 	g.opts.lineSpacing = 0.5 * fontSize
-
 	g.opts.itemMargin = 0.8 * fontSize
-
 	g.opts.itemNoteFontSize = 0.75 * fontSize
 	g.opts.itemNoteMargin = 1.15 * (0.75 * fontSize)
-
 	g.opts.groupTitleFontSize = fontSize + 4
 	g.opts.groupTitleMargin = 1.1 * (fontSize + 4)
-
 	g.opts.documentTitleFontSize = (fontSize + 4) + 4
 
-	return os.MkdirAll(g.opts.outputDir, 0755)
+	return os.MkdirAll(g.outputDir, 0755)
 }
 
 func (g *pdfRenderImpl) setMeta(title string) {
@@ -211,21 +164,28 @@ func (g *pdfRenderImpl) handleDocumentTitle(y float64, title string) (float64, e
 	g.filename = fmt.Sprintf("%s.pdf", slugify.Sprint(title))
 
 	// Calcola larghezza testo
-	titleWidth, err := g.doc.MeasureTextWidth(title)
+	tw, err := g.doc.MeasureTextWidth(title)
 	if err != nil {
 		return y, err
 	}
 
+	th, err := g.doc.MeasureCellHeightByText(title)
+	if err != nil {
+		return y, err
+	}
+
+	y += th
+
 	// Centra il testo orizzontalmente
-	titleX := (g.opts.pageWidth - titleWidth) / 2
+	titleX := (g.opts.pageWidth - tw) / 2
 
 	// Posiziona in alto
 	g.doc.SetX(titleX)
-	g.doc.SetY(g.opts.marginTop)
+	g.doc.SetY(y)
 	g.doc.Text(title)
 
 	// Sposta `y` sotto il titolo
-	y += g.opts.marginTop + g.opts.documentTitleFontSize + 0.5*g.opts.groupTitleMargin
+	y += g.opts.documentTitleFontSize + g.opts.groupTitleMargin
 
 	return y, nil
 }
@@ -246,7 +206,13 @@ func (g *pdfRenderImpl) handleItem(y float64, line string) (float64, error) {
 		if y+g.opts.itemFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
 			g.doc.AddPage()
 			g.pageCount++
-			y = g.opts.marginTop
+
+			th, err := g.doc.MeasureCellHeightByText(l)
+			if err != nil {
+				return y, err
+			}
+
+			y = g.opts.marginTop + th
 		}
 
 		g.doc.SetX(g.opts.marginLeft)
@@ -302,5 +268,5 @@ func (g *pdfRenderImpl) savePDF() error {
 		g.doc.Text(pageText)
 	}
 
-	return g.doc.WritePdf(filepath.Join(g.opts.outputDir, g.filename))
+	return g.doc.WritePdf(filepath.Join(g.outputDir, g.filename))
 }

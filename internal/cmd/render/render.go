@@ -10,19 +10,18 @@ import (
 	getoptutil "github.com/lucasepe/checkit/internal/util/getopt"
 	ioutil "github.com/lucasepe/checkit/internal/util/io"
 	"github.com/lucasepe/x/getopt"
-	"github.com/lucasepe/x/text/conv"
 )
 
 func Do(args []string) error {
 	extras, opts, err := getopt.GetOpt(args,
-		"s:o:",
-		[]string{"font-size", "output"},
+		"o:s",
+		[]string{"output", "square"},
 	)
 	if err != nil {
 		return err
 	}
 
-	fontSize := conv.Float64(getoptutil.FindOptVal(opts, []string{"-s", "--font-size"}), 12.0)
+	square := getoptutil.HasOpt(opts, []string{"-s", "--square"})
 	output := getoptutil.FindOptVal(opts, []string{"-o", "--output-dir"})
 
 	var filename string
@@ -45,7 +44,7 @@ func Do(args []string) error {
 	}
 
 	render, err := pdfrender.New(
-		pdfrender.FontSize(fontSize),
+		pdfrender.Square(square),
 		pdfrender.OutputDir(output),
 	)
 	if err != nil {
