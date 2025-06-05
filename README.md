@@ -21,8 +21,8 @@ If no `INPUT_FILE` is provided, input is read from `stdin`.
 ### Options
 
 ```
-  -o, --output       Output directory for generated PDF (default: current directory)
-  -s, --font-size    Base font size in points (default: 12)
+  -o, --output-dir   Output directory for generated PDF.
+  -s, --square       Use a 1:1 aspect ratio layout.
   -v, --version      Show version and exit
   -h, --help         Show help and exit
 ```
