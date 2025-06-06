@@ -145,6 +145,8 @@ func (g *pdfRenderImpl) handleGroup(y float64, title string) (float64, error) {
 		y += g.opts.groupTitleMargin
 	}
 
+	g.doc.SetTextColor(53, 57, 53)
+
 	g.doc.SetFont(fontName, "", g.opts.groupTitleFontSize)
 	g.doc.SetX(g.opts.marginLeft)
 	g.doc.SetY(y)
@@ -156,12 +158,12 @@ func (g *pdfRenderImpl) handleGroup(y float64, title string) (float64, error) {
 }
 
 func (g *pdfRenderImpl) handleDocumentTitle(y float64, title string) (float64, error) {
+	g.filename = fmt.Sprintf("%s.pdf", slugify.Sprint(title))
+
 	err := g.doc.SetFont(fontName, "", g.opts.documentTitleFontSize)
 	if err != nil {
 		return y, err
 	}
-
-	g.filename = fmt.Sprintf("%s.pdf", slugify.Sprint(title))
 
 	// Calcola larghezza testo
 	tw, err := g.doc.MeasureTextWidth(title)
@@ -179,6 +181,8 @@ func (g *pdfRenderImpl) handleDocumentTitle(y float64, title string) (float64, e
 	// Centra il testo orizzontalmente
 	titleX := (g.opts.pageWidth - tw) / 2
 
+	g.doc.SetTextColor(112, 128, 144)
+
 	// Posiziona in alto
 	g.doc.SetX(titleX)
 	g.doc.SetY(y)
@@ -195,6 +199,8 @@ func (g *pdfRenderImpl) handleItem(y float64, line string) (float64, error) {
 	if err != nil {
 		return y, err
 	}
+
+	g.doc.SetTextColor(54, 69, 79)
 
 	prefix := fmt.Sprintf(" %s ", symbol)
 	maxTextWidth := g.opts.pageWidth - 2*g.opts.marginLeft
@@ -230,6 +236,8 @@ func (g *pdfRenderImpl) handleItemNote(y float64, line string) (float64, error) 
 		return y, err
 	}
 
+	g.doc.SetTextColor(132, 136, 139)
+
 	maxTextWidth := g.opts.pageWidth - 2*g.opts.marginLeft
 	wrappedLines := wrapTextWithPrefix(g.doc, line, itemNoteIndent, itemNoteIndent, maxTextWidth)
 
@@ -254,6 +262,8 @@ func (g *pdfRenderImpl) savePDF() error {
 	if err != nil {
 		return err
 	}
+
+	g.doc.SetTextColor(54, 69, 79)
 
 	for i := range g.pageCount {
 		g.doc.SetPage(i + 1)
