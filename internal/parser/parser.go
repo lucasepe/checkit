@@ -51,7 +51,12 @@ func Parse(src io.Reader) (CheckList, error) {
 
 		case strings.HasPrefix(line, ">"):
 			if currentItem == nil {
-				return list, fmt.Errorf("note does not belong to any item: %q", line)
+				if currentGroup == nil {
+					return list, fmt.Errorf("note does not belong to any item: %q", line)
+				}
+				note := strings.TrimSpace(line[1:])
+				currentGroup.Notes = append(currentGroup.Notes, note)
+				continue
 			}
 			note := strings.TrimSpace(line[1:])
 			currentItem.Notes = append(currentItem.Notes, note)

@@ -37,17 +37,12 @@ type pdfRenderOptions struct {
 	marginLeft   float64
 
 	groupTitleFontSize float64
-	groupTitleMargin   float64
+	groupNoteFontSize  float64
 
-	itemFontSize float64
-	itemMargin   float64
-
+	itemFontSize     float64
 	itemNoteFontSize float64
-	itemNoteMargin   float64
 
 	documentTitleFontSize float64
-
-	lineSpacing float64
 }
 
 func defaultOptions() pdfRenderOptions {

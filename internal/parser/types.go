@@ -7,6 +7,7 @@ type Item struct {
 
 type Group struct {
 	Title string
+	Notes []string
 	Items []Item
 }
 

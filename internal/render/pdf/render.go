@@ -5,11 +5,13 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lucasepe/checkit/internal/parser"
 	"github.com/lucasepe/checkit/internal/render"
 	"github.com/lucasepe/x/text/slugify"
+	"github.com/mattn/go-runewidth"
 	"github.com/signintech/gopdf"
 	"golang.org/x/image/font/gofont/gomono"
 )
@@ -35,7 +37,7 @@ func New(opts ...RenderOption) (render.Renderer, error) {
 			H: g.opts.pageHeight,
 		},
 	})
-	err := g.doc.AddTTFFontData(fontName, gomono.TTF)
+	err := g.doc.AddTTFFontData(defaultFontName, gomono.TTF)
 	if err != nil {
 		return g, err
 	}
@@ -47,12 +49,10 @@ func New(opts ...RenderOption) (render.Renderer, error) {
 }
 
 const (
-	fontName       = "GoMono"
-	symbol         = "\u25CB" // ○
-	itemIndent     = "   "    // Indent for wrapped lines
-	itemNoteIndent = "     "  // Indent for wrapped lines
-
-	defaultCreator = "Check IT (github.com/lucasepe/checkit)"
+	defaultFontName         = "GoMono"
+	defaultSymbol           = " \u25CB " // ○
+	defaultLineSpacingRatio = 0.5
+	defaultCreator          = "Check IT (github.com/lucasepe/checkit)"
 )
 
 var _ render.Renderer = (*pdfRenderImpl)(nil)
@@ -83,6 +83,13 @@ func (g *pdfRenderImpl) Render(lst *parser.CheckList) (err error) {
 			return err
 		}
 
+		for _, el := range grp.Notes {
+			y, err = g.handleGroupNote(y, el)
+			if err != nil {
+				return err
+			}
+		}
+
 		for _, it := range grp.Items {
 			y, err = g.handleItem(y, it.Title)
 			if err != nil {
@@ -105,12 +112,9 @@ func (g *pdfRenderImpl) setup() error {
 	fontSize := 0.02 * math.Min(g.opts.pageWidth, g.opts.pageHeight)
 
 	g.opts.itemFontSize = fontSize
-	g.opts.lineSpacing = 0.5 * fontSize
-	g.opts.itemMargin = 0.8 * fontSize
 	g.opts.itemNoteFontSize = 0.75 * fontSize
-	g.opts.itemNoteMargin = 1.15 * (0.75 * fontSize)
 	g.opts.groupTitleFontSize = fontSize + 4
-	g.opts.groupTitleMargin = 1.1 * (fontSize + 4)
+	g.opts.groupNoteFontSize = fontSize + 2
 	g.opts.documentTitleFontSize = (fontSize + 4) + 4
 
 	return os.MkdirAll(g.outputDir, 0755)
@@ -135,130 +139,78 @@ func (g *pdfRenderImpl) setMeta(title string) {
 	})
 }
 
-func (g *pdfRenderImpl) handleGroup(y float64, title string) (float64, error) {
-	if y+g.opts.groupTitleFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
-		g.doc.AddPage()
-		g.pageCount++
-
-		y = g.opts.marginTop
-	} else {
-		y += g.opts.groupTitleMargin
-	}
-
-	g.doc.SetTextColor(53, 57, 53)
-
-	g.doc.SetFont(fontName, "", g.opts.groupTitleFontSize)
-	g.doc.SetX(g.opts.marginLeft)
-	g.doc.SetY(y)
-	g.doc.Text(title)
-
-	y += g.opts.groupTitleFontSize //+ 0.5*g.opts.groupTitleMargin
-
-	return y, nil
-}
-
 func (g *pdfRenderImpl) handleDocumentTitle(y float64, title string) (float64, error) {
 	g.filename = fmt.Sprintf("%s.pdf", slugify.Sprint(title))
 
-	err := g.doc.SetFont(fontName, "", g.opts.documentTitleFontSize)
-	if err != nil {
-		return y, err
-	}
+	prefix := ""
+	y += defaultLineSpacingRatio * g.opts.documentTitleFontSize
+	return g.renderText(y, title, prefix, g.opts.documentTitleFontSize, true, 53, 57, 53)
+}
 
-	// Calcola larghezza testo
-	tw, err := g.doc.MeasureTextWidth(title)
-	if err != nil {
-		return y, err
-	}
+func (g *pdfRenderImpl) handleGroup(y float64, title string) (float64, error) {
+	prefix := ""
+	y += defaultLineSpacingRatio * g.opts.groupTitleFontSize
+	return g.renderText(y, title, prefix, g.opts.groupTitleFontSize, false, 53, 57, 53)
+}
 
-	th, err := g.doc.MeasureCellHeightByText(title)
-	if err != nil {
-		return y, err
-	}
-
-	y += th
-
-	// Centra il testo orizzontalmente
-	titleX := (g.opts.pageWidth - tw) / 2
-
-	g.doc.SetTextColor(112, 128, 144)
-
-	// Posiziona in alto
-	g.doc.SetX(titleX)
-	g.doc.SetY(y)
-	g.doc.Text(title)
-
-	// Sposta `y` sotto il titolo
-	y += g.opts.documentTitleFontSize + g.opts.groupTitleMargin
-
-	return y, nil
+func (g *pdfRenderImpl) handleGroupNote(y float64, line string) (float64, error) {
+	prefix := " "
+	return g.renderText(y, line, prefix, g.opts.groupNoteFontSize, false, 178, 190, 181)
 }
 
 func (g *pdfRenderImpl) handleItem(y float64, line string) (float64, error) {
-	err := g.doc.SetFont(fontName, "", g.opts.itemFontSize) // reset to item font
+	prefix := defaultSymbol
+
+	return g.renderText(y, line, prefix, g.opts.itemFontSize, false, 54, 69, 79)
+}
+
+func (g *pdfRenderImpl) handleItemNote(y float64, line string) (float64, error) {
+	prefix := strings.Repeat(" ", 5)
+	return g.renderText(y, line, prefix, g.opts.itemNoteFontSize, false, 132, 136, 139)
+}
+
+func (rdr *pdfRenderImpl) renderText(y float64, line string, firstPrefix string, fontSize float64, center bool, r, g, b uint8) (float64, error) {
+	err := rdr.doc.SetFont(defaultFontName, "", fontSize)
 	if err != nil {
 		return y, err
 	}
 
-	g.doc.SetTextColor(54, 69, 79)
+	rdr.doc.SetTextColor(r, g, b)
 
-	prefix := fmt.Sprintf(" %s ", symbol)
-	maxTextWidth := g.opts.pageWidth - 2*g.opts.marginLeft
-	wrappedLines := wrapTextWithPrefix(g.doc, line, prefix, itemIndent, maxTextWidth)
+	indent := strings.Repeat(" ", runewidth.StringWidth(firstPrefix))
+	maxTextWidth := rdr.opts.pageWidth - 2*rdr.opts.marginLeft
+	wrappedLines := wrapTextWithPrefix(rdr.doc, line, firstPrefix, indent, maxTextWidth)
 
-	y += g.opts.itemMargin
+	deltaY := defaultLineSpacingRatio * fontSize
 
 	for _, l := range wrappedLines {
-		if y+g.opts.itemFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
-			g.doc.AddPage()
-			g.pageCount++
 
-			th, err := g.doc.MeasureCellHeightByText(l)
+		if y+fontSize+2*deltaY > rdr.opts.pageHeight-rdr.opts.marginBottom {
+			rdr.doc.AddPage()
+			rdr.pageCount++
+			y = rdr.opts.marginTop
+		}
+
+		x := rdr.opts.marginLeft
+		if center {
+			tw, err := rdr.doc.MeasureTextWidth(l)
 			if err != nil {
 				return y, err
 			}
 
-			y = g.opts.marginTop + th
+			x = ((rdr.opts.pageWidth - rdr.opts.marginLeft) - tw) / 2
 		}
-
-		g.doc.SetX(g.opts.marginLeft)
-		g.doc.SetY(y)
-		g.doc.Text(l)
-		y += g.opts.itemFontSize + g.opts.itemMargin
-	}
-
-	return y, nil
-}
-
-func (g *pdfRenderImpl) handleItemNote(y float64, line string) (float64, error) {
-	err := g.doc.SetFont(fontName, "", g.opts.itemNoteFontSize) // reset to item font
-	if err != nil {
-		return y, err
-	}
-
-	g.doc.SetTextColor(132, 136, 139)
-
-	maxTextWidth := g.opts.pageWidth - 2*g.opts.marginLeft
-	wrappedLines := wrapTextWithPrefix(g.doc, line, itemNoteIndent, itemNoteIndent, maxTextWidth)
-
-	for _, l := range wrappedLines {
-		if y+g.opts.itemNoteFontSize+g.opts.lineSpacing > g.opts.pageHeight-g.opts.marginBottom {
-			g.doc.AddPage()
-			g.pageCount++
-			y = g.opts.marginTop
-		}
-
-		g.doc.SetX(g.opts.marginLeft)
-		g.doc.SetY(y)
-		g.doc.Text(l)
-		y += g.opts.itemNoteFontSize + g.opts.itemNoteMargin
+		rdr.doc.SetX(x)
+		rdr.doc.SetY(y + deltaY)
+		rdr.doc.Text(l)
+		y += (fontSize + 2*deltaY)
 	}
 
 	return y, nil
 }
 
 func (g *pdfRenderImpl) savePDF() error {
-	err := g.doc.SetFont(fontName, "", 8.0)
+	err := g.doc.SetFont(defaultFontName, "", 8.0)
 	if err != nil {
 		return err
 	}
