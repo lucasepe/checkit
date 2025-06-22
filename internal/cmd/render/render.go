@@ -15,14 +15,14 @@ import (
 func Do(args []string) error {
 	extras, opts, err := getopt.GetOpt(args,
 		"o:s",
-		[]string{"output", "square"},
+		[]string{"output=", "square"},
 	)
 	if err != nil {
 		return err
 	}
 
 	square := getoptutil.HasOpt(opts, []string{"-s", "--square"})
-	output := getoptutil.FindOptVal(opts, []string{"-o", "--output-dir"})
+	output := getoptutil.FindOptVal(opts, []string{"-o", "--output"})
 
 	var filename string
 	if len(extras) > 0 {
